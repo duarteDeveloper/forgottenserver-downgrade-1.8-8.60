@@ -175,6 +175,18 @@ TEST_CASE(test_store_protocol_opcodes)
 	CHECK(StoreProtocol::shouldUseLegacyCatalog(NetworkMessage::MAX_PROTOCOL_BODY_LENGTH, false));
 	CHECK(!StoreProtocol::shouldUseLegacyCatalog(
 	    static_cast<size_t>(NetworkMessage::MAX_PROTOCOL_BODY_LENGTH) + 1, false));
+
+	// TibiaExtendedClientLibrary: 8.60 receive buffer of 16394 bytes per message
+	CHECK(StoreProtocol::TibiaExtHelloMagic == 0x54584554);
+	CHECK(StoreProtocol::TibiaExtHelloVersion == 1);
+	CHECK(StoreProtocol::TibiaExtCatalogChunkTargetSize < StoreProtocol::TibiaExtMaxMessageBody);
+	CHECK(StoreProtocol::TibiaExtMaxMessageBody + NetworkMessage::HEADER_LENGTH + NetworkMessage::CHECKSUM_LENGTH +
+	          NetworkMessage::XTEA_MULTIPLE + sizeof(uint16_t) <=
+	      16394);
+	CHECK(StoreProtocol::shouldUseLegacyCatalog(StoreProtocol::TibiaExtCatalogChunkTargetSize, true,
+	                                            StoreProtocol::TibiaExtCatalogChunkTargetSize));
+	CHECK(!StoreProtocol::shouldUseLegacyCatalog(StoreProtocol::TibiaExtCatalogChunkTargetSize + 1, true,
+	                                             StoreProtocol::TibiaExtCatalogChunkTargetSize));
 }
 
 TEST_CASE(test_store_catalog_chunk_packet_layout)

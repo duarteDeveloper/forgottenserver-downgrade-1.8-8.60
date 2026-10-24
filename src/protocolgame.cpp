@@ -1855,7 +1855,7 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			break;
 
 		case 0xF8: /* custom store transfer */
-			if (isOTC) {
+			if (canUseStoreProtocol()) {
 				parseStoreTransfer(msg);
 			} else {
 				skipUnreadBytes(msg);
@@ -1863,7 +1863,7 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			break;
 
 		case 0xFA: /* custom store history */
-			if (isOTC) {
+			if (canUseStoreProtocol()) {
 				parseStoreHistory(msg);
 			} else {
 				skipUnreadBytes(msg);
@@ -1871,7 +1871,10 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			break;
 
 		case 0xFB: /* custom store open */
-			if (isOTC) {
+			if (!isOTC && consumeTibiaExtStoreHello(msg)) {
+				isTibiaExtStore = true;
+			}
+			if (canUseStoreProtocol()) {
 				parseStoreOpen(msg);
 			} else {
 				skipUnreadBytes(msg);
@@ -1879,7 +1882,7 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			break;
 
 		case 0xFC: /* custom store buy */
-			if (isOTC) {
+			if (canUseStoreProtocol()) {
 				parseStorePurchase(msg);
 			} else {
 				skipUnreadBytes(msg);
@@ -1937,9 +1940,38 @@ void ProtocolGame::parseCharacterBazaar(NetworkMessage& msg)
 	CharacterBazaar::sendCreateResult(player.get(), success, result);
 }
 
+bool ProtocolGame::consumeTibiaExtStoreHello(NetworkMessage& msg)
+{
+	constexpr std::size_t helloSize = sizeof(uint32_t) + sizeof(uint8_t);
+	if (getUnreadBytes(msg) != helloSize) {
+		return false;
+	}
+
+	const auto start = msg.getBufferPosition();
+	const uint32_t magic = msg.get<uint32_t>();
+	const uint8_t helloVersion = msg.getByte();
+	if (magic == StoreProtocol::TibiaExtHelloMagic && helloVersion == StoreProtocol::TibiaExtHelloVersion) {
+		return true;
+	}
+
+	msg.setBufferPosition(start);
+	return false;
+}
+
+void ProtocolGame::writeStoreMessage(const NetworkMessage& msg)
+{
+	if (isTibiaExtStore) {
+		auto& current = getCurrentBuffer();
+		if (current && current->getLength() + msg.getLength() > StoreProtocol::TibiaExtMaxMessageBody) {
+			send(std::move(current));
+		}
+	}
+	writeToOutputBuffer(msg);
+}
+
 void ProtocolGame::parseStoreOpen(NetworkMessage& msg)
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		skipUnreadBytes(msg);
 		return;
 	}
@@ -1962,7 +1994,7 @@ void ProtocolGame::parseStoreOpen(NetworkMessage& msg)
 
 void ProtocolGame::parseStorePurchase(NetworkMessage& msg)
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		skipUnreadBytes(msg);
 		return;
 	}
@@ -2042,7 +2074,7 @@ void ProtocolGame::parseStorePurchase(NetworkMessage& msg)
 
 void ProtocolGame::parseStoreHistory(NetworkMessage& msg)
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		skipUnreadBytes(msg);
 		return;
 	}
@@ -2065,7 +2097,7 @@ void ProtocolGame::parseStoreHistory(NetworkMessage& msg)
 
 void ProtocolGame::parseStoreTransfer(NetworkMessage& msg)
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		skipUnreadBytes(msg);
 		return;
 	}
@@ -4326,7 +4358,7 @@ void ProtocolGame::sendFYIBox(std::string_view message)
 
 void ProtocolGame::sendStoreCatalog()
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		return;
 	}
 	if (!getBoolean(ConfigManager::GAME_STORE_ENABLED)) {
@@ -4358,7 +4390,14 @@ void ProtocolGame::sendStoreCatalog()
 
 	const bool isAstra = isAstraClient;
 	const bool taskBoardStoreClient = isAstra || isFonticakClient;
-	const bool sendHighlights = supportsGameStoreHighlights;
+	// TibiaExtendedClientLibrary reads highlights, base prices and chunks
+	const bool sendHighlights = supportsGameStoreHighlights || isTibiaExtStore;
+	const bool sendBasePrice = supportsAstraStoreBasePrice || isTibiaExtStore;
+	const bool catalogChunks = supportsAstraStoreCatalogChunks || isTibiaExtStore;
+	const size_t chunkTargetSize =
+	    isTibiaExtStore ? StoreProtocol::TibiaExtCatalogChunkTargetSize : StoreProtocol::CatalogChunkTargetSize;
+	const size_t maxMessageBody = isTibiaExtStore ? StoreProtocol::TibiaExtMaxMessageBody
+	                                              : static_cast<size_t>(NetworkMessage::MAX_PROTOCOL_BODY_LENGTH);
 	const auto nowSeconds = std::chrono::duration_cast<std::chrono::seconds>(
 	    std::chrono::system_clock::now().time_since_epoch()).count();
 	const uint32_t nowTimestamp = static_cast<uint32_t>(std::clamp<int64_t>(
@@ -4514,7 +4553,7 @@ void ProtocolGame::sendStoreCatalog()
 	};
 	const auto offerWireSize = [&](const FilteredOffer& fo) {
 		size_t size = sizeof(uint32_t) + stringWireSize(fo.offer->name) + stringWireSize(fo.offer->icon) +
-		              sizeof(uint32_t) + (supportsAstraStoreBasePrice ? sizeof(uint32_t) : 0) + sizeof(uint16_t) * 2 +
+		              sizeof(uint32_t) + (sendBasePrice ? sizeof(uint32_t) : 0) + sizeof(uint16_t) * 2 +
 		              stringWireSize(fo.offer->description) + stringWireSize(storeOfferTypeToString(fo.offer->type));
 		if (sendHighlights) {
 			const auto state = StoreProtocol::effectiveHighlightState(fo.state, fo.validUntilTimestamp, nowTimestamp);
@@ -4554,7 +4593,7 @@ void ProtocolGame::sendStoreCatalog()
 			msg.addString(fo.offer->icon);
 			// The negotiated Astra layout carries both values so the client
 			// never has to reconstruct the original price from a percentage.
-			StoreProtocol::addOfferPrices(msg, supportsAstraStoreBasePrice, fo.price, fo.basePrice);
+			StoreProtocol::addOfferPrices(msg, sendBasePrice, fo.price, fo.basePrice);
 			msg.add<uint16_t>(fo.displayId);
 			msg.add<uint16_t>(fo.offer->count);
 			msg.addString(fo.offer->description);
@@ -4584,7 +4623,7 @@ void ProtocolGame::sendStoreCatalog()
 		}
 	}
 
-	if (StoreProtocol::shouldUseLegacyCatalog(estimatedLegacySize, supportsAstraStoreCatalogChunks)) {
+	if (StoreProtocol::shouldUseLegacyCatalog(estimatedLegacySize, catalogChunks, chunkTargetSize)) {
 		NetworkMessage msg;
 		msg.addByte(StoreProtocol::ServerOpcode);
 		msg.addByte(static_cast<uint8_t>(StoreProtocol::ResponseType::Catalog));
@@ -4594,10 +4633,10 @@ void ProtocolGame::sendStoreCatalog()
 			addCategoryPart(msg, fcat, 0, fcat.offers.size());
 		}
 		addBanners(msg);
-		writeToOutputBuffer(msg);
+		writeStoreMessage(msg);
 		return;
 	}
-	if (!supportsAstraStoreCatalogChunks) {
+	if (!catalogChunks) {
 		LOG_WARN(
 		    fmt::format("[StoreCatalog] Refusing to send an estimated {}-byte catalog to a client "
 		                "without negotiated catalog chunk support.",
@@ -4624,7 +4663,7 @@ void ProtocolGame::sendStoreCatalog()
 		const size_t categorySize = categoryHeaderWireSize(fcat);
 		if (fcat.offers.empty()) {
 			if (!chunks.back().parts.empty() &&
-			    chunks.back().estimatedSize + categorySize > StoreProtocol::CatalogChunkTargetSize) {
+			    chunks.back().estimatedSize + categorySize > chunkTargetSize) {
 				chunks.push_back(CatalogChunk{{}, chunkHeaderSize});
 			}
 			chunks.back().parts.push_back(CategoryPart{&fcat, 0, 0});
@@ -4636,7 +4675,7 @@ void ProtocolGame::sendStoreCatalog()
 		while (offerIndex < fcat.offers.size()) {
 			const size_t firstOfferSize = offerWireSize(fcat.offers[offerIndex]);
 			if (!chunks.back().parts.empty() &&
-			    chunks.back().estimatedSize + categorySize + firstOfferSize > StoreProtocol::CatalogChunkTargetSize) {
+			    chunks.back().estimatedSize + categorySize + firstOfferSize > chunkTargetSize) {
 				chunks.push_back(CatalogChunk{{}, chunkHeaderSize});
 			}
 
@@ -4644,7 +4683,7 @@ void ProtocolGame::sendStoreCatalog()
 			chunks.back().estimatedSize += categorySize;
 			while (offerIndex < fcat.offers.size()) {
 				const size_t size = offerWireSize(fcat.offers[offerIndex]);
-				if (part.offerCount > 0 && chunks.back().estimatedSize + size > StoreProtocol::CatalogChunkTargetSize) {
+				if (part.offerCount > 0 && chunks.back().estimatedSize + size > chunkTargetSize) {
 					break;
 				}
 				chunks.back().estimatedSize += size;
@@ -4658,16 +4697,15 @@ void ProtocolGame::sendStoreCatalog()
 		}
 	}
 
-	if (chunks.back().estimatedSize + bannersWireSize() > StoreProtocol::CatalogChunkTargetSize) {
+	if (chunks.back().estimatedSize + bannersWireSize() > chunkTargetSize) {
 		chunks.push_back(CatalogChunk{{}, chunkHeaderSize});
 	}
 	chunks.back().estimatedSize += bannersWireSize();
 
-	if (std::any_of(chunks.begin(), chunks.end(), [](const CatalogChunk& chunk) {
-		    return chunk.estimatedSize > NetworkMessage::MAX_PROTOCOL_BODY_LENGTH;
+	if (std::any_of(chunks.begin(), chunks.end(), [maxMessageBody](const CatalogChunk& chunk) {
+		    return chunk.estimatedSize > maxMessageBody;
 	    })) {
-		LOG_ERROR(fmt::format("[StoreCatalog] A catalog chunk exceeds the protocol limit ({} bytes).",
-		                      static_cast<size_t>(NetworkMessage::MAX_PROTOCOL_BODY_LENGTH)));
+		LOG_ERROR(fmt::format("[StoreCatalog] A catalog chunk exceeds the protocol limit ({} bytes).", maxMessageBody));
 		sendStoreError("Store catalog contains an entry that is too large.");
 		return;
 	}
@@ -4685,7 +4723,7 @@ void ProtocolGame::sendStoreCatalog()
 		if (last) {
 			addBanners(msg);
 		}
-		writeToOutputBuffer(msg);
+		writeStoreMessage(msg);
 	}
 
 	LOG_DEBUG(fmt::format("[StoreCatalog] Sent {} offers in {} chunks (estimated {} bytes).", visibleOfferCount,
@@ -4694,7 +4732,7 @@ void ProtocolGame::sendStoreCatalog()
 
 void ProtocolGame::sendStoreError(std::string_view message)
 {
-	if (!isOTC) {
+	if (!canUseStoreProtocol()) {
 		return;
 	}
 
@@ -4702,12 +4740,12 @@ void ProtocolGame::sendStoreError(std::string_view message)
 	msg.addByte(StoreProtocol::ServerOpcode);
 	msg.addByte(static_cast<uint8_t>(StoreProtocol::ResponseType::Error));
 	msg.addString(message);
-	writeToOutputBuffer(msg);
+	writeStoreMessage(msg);
 }
 
 void ProtocolGame::sendStorePurchaseSuccess(uint32_t offerId, std::string_view message, uint32_t newBalance)
 {
-	if (!isOTC) {
+	if (!canUseStoreProtocol()) {
 		return;
 	}
 
@@ -4717,12 +4755,12 @@ void ProtocolGame::sendStorePurchaseSuccess(uint32_t offerId, std::string_view m
 	msg.add<uint32_t>(offerId);
 	msg.addString(message);
 	msg.add<uint32_t>(newBalance);
-	writeToOutputBuffer(msg);
+	writeStoreMessage(msg);
 }
 
 void ProtocolGame::sendStoreHistory()
 {
-	if (!player || !isOTC) {
+	if (!player || !canUseStoreProtocol()) {
 		return;
 	}
 	if (!getBoolean(ConfigManager::GAME_STORE_ENABLED)) {
@@ -4748,7 +4786,7 @@ void ProtocolGame::sendStoreHistory()
 		msg.add<uint16_t>(static_cast<uint16_t>(std::max<int32_t>(entry.count, 0)));
 	}
 
-	writeToOutputBuffer(msg);
+	writeStoreMessage(msg);
 }
 
 // tile

@@ -104,6 +104,8 @@ private:
 	void disconnectClient(std::string_view message) const;
 	void dispatchCancelMessage(ReturnValue message) const;
 	void writeToOutputBuffer(const NetworkMessage& msg);
+	// Store responses: same as writeToOutputBuffer, capped for the 8.60 client
+	void writeStoreMessage(const NetworkMessage& msg);
 
 	void release() override;
 
@@ -169,6 +171,7 @@ private:
 	void parseStorePurchase(NetworkMessage& msg);
 	void parseStoreHistory(NetworkMessage& msg);
 	void parseStoreTransfer(NetworkMessage& msg);
+	bool consumeTibiaExtStoreHello(NetworkMessage& msg);
 
 
 	// trade methods
@@ -466,6 +469,9 @@ private:
 	bool supportsAstraBestiaryBannerCreatureData = false;
 	bool supportsAstraExtendedSpellIds = false;
 	bool supportsAstraShopBuyAmountU16 = false;
+	// TibiaExtendedClientLibrary: set by the hello in its store Open request
+	bool isTibiaExtStore = false;
+	bool canUseStoreProtocol() const { return isOTC || isTibiaExtStore; }
 	bool supportsZoneWeather = false;
 	bool supportsDllZoneWeather = false;
 	bool zoneWeatherFeatureEnabled = false;

@@ -37,9 +37,20 @@ inline constexpr uint8_t CatalogChunkStart = 1 << 0;
 inline constexpr uint8_t CatalogChunkEnd = 1 << 1;
 inline constexpr size_t CatalogChunkTargetSize = 48 * 1024;
 
-[[nodiscard]] constexpr bool shouldUseLegacyCatalog(size_t estimatedSize, bool supportsCatalogChunks) noexcept
+/// TibiaExtendedClientLibrary (the CipSoft 8.60 client with its ddraw.dll).
+/// Its Open request starts with this hello, which turns the store protocol on
+/// for the session. The 8.60 receive buffer holds 16394 bytes per network
+/// message, so its catalog always goes in small chunks and a store message
+/// never shares an output message that would grow past TibiaExtMaxMessageBody.
+inline constexpr uint32_t TibiaExtHelloMagic = 0x54584554; // "TEXT"
+inline constexpr uint8_t TibiaExtHelloVersion = 1;
+inline constexpr size_t TibiaExtCatalogChunkTargetSize = 12 * 1024;
+inline constexpr size_t TibiaExtMaxMessageBody = 15000;
+
+[[nodiscard]] constexpr bool shouldUseLegacyCatalog(size_t estimatedSize, bool supportsCatalogChunks,
+                                                    size_t chunkTargetSize = CatalogChunkTargetSize) noexcept
 {
-	return estimatedSize <= CatalogChunkTargetSize ||
+	return estimatedSize <= chunkTargetSize ||
 	       (!supportsCatalogChunks && estimatedSize <= NetworkMessage::MAX_PROTOCOL_BODY_LENGTH);
 }
 
