@@ -1495,7 +1495,8 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 				}
 				break; // otclient extended opcode
 			case 0x40:
-				if (isOTC) {
+				// OTClient and the TibiaExtendedClientLibrary DLL (after its login hello)
+				if (isOTC || isTibiaExtStore) {
 					parseNewPing(msg);
 				}
 				break; // GameClientExtendedPing
@@ -1546,7 +1547,8 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			}
 			break; // otclient extended opcode
 		case 0x40:
-			if (isOTC) {
+			// OTClient and the TibiaExtendedClientLibrary DLL (after its login hello)
+			if (isOTC || isTibiaExtStore) {
 				parseNewPing(msg);
 			}
 			break; // GameClientExtendedPing
