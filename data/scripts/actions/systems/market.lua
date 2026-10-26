@@ -3,7 +3,8 @@ local MARKET_ITEM_ID = ITEM_MARKET or 12903
 local action = Action()
 
 function action.onUse(player, item, fromPosition, target, toPosition, isHotkey)
-	if not player:isUsingOtClient() then
+	local tibiaExt = player.isUsingTibiaExt and player:isUsingTibiaExt()
+	if not player:isUsingOtClient() and not tibiaExt then
 		player:sendCancelMessage("The market is only available on OTClient.")
 		return true
 	end

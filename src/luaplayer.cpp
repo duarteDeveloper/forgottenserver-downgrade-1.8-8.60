@@ -3826,6 +3826,19 @@ int luaPlayerIsUsingAstraClient(lua_State* L)
 	return 1;
 }
 
+int luaPlayerIsUsingTibiaExt(lua_State* L)
+{
+	// player:isUsingTibiaExt()
+	const Player* player = getUserdata<const Player>(L, 1);
+	if (!player) {
+		lua_pushnil(L);
+		return 1;
+	}
+
+	pushBoolean(L, player->isTibiaExt());
+	return 1;
+}
+
 int luaPlayerIsUsingFonticakClient(lua_State* L)
 {
 	// player:isUsingFonticakClient()
@@ -5238,6 +5251,7 @@ void LuaScriptInterface::registerPlayer()
 	registerMethod("Player", "isUsingOtcV8", luaPlayerIsUsingOtcV8);
 	registerMethod("Player", "isUsingAstraClient", luaPlayerIsUsingAstraClient);
 	registerMethod("Player", "isUsingFonticakClient", luaPlayerIsUsingFonticakClient);
+	registerMethod("Player", "isUsingTibiaExt", luaPlayerIsUsingTibiaExt);
 	registerMethod("Player", "isUsingOtc", luaPlayerIsUsingOtc);
 	registerMethod("Player", "getLastIp", luaPlayerGetLastIp);
 

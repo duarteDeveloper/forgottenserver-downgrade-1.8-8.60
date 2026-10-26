@@ -1576,7 +1576,8 @@ public:
 	void sendNetworkMessage(const NetworkMessage& message)
 	{
 		if (client) {
-			client->writeToOutputBuffer(message);
+			// TibiaExt: never grows one output message past the 8.60 receive buffer
+			client->writeStoreMessage(message);
 		}
 	}
 
@@ -1708,6 +1709,8 @@ public:
 	bool isMehah() const { return client ? client->isMehah : false; }
 	bool isAstraClient() const { return client ? client->isAstraClient : false; }
 	bool isFonticakClient() const { return client ? client->isFonticakClient : false; }
+	// CipSoft 8.60 client with the TibiaExtendedClientLibrary ddraw.dll (hello received)
+	bool isTibiaExt() const { return client ? client->isTibiaExt() : false; }
 	bool isOTC() const
 	{
 		switch (operatingSystem) {

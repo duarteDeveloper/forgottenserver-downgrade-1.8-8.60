@@ -179,6 +179,7 @@ TEST_CASE(test_store_protocol_opcodes)
 	// TibiaExtendedClientLibrary: 8.60 receive buffer of 16394 bytes per message
 	CHECK(StoreProtocol::TibiaExtHelloMagic == 0x54584554);
 	CHECK(StoreProtocol::TibiaExtHelloVersion == 1);
+	CHECK(StoreProtocol::TibiaExtHelloOnlyVersion == 2);
 	CHECK(StoreProtocol::TibiaExtCatalogChunkTargetSize < StoreProtocol::TibiaExtMaxMessageBody);
 	CHECK(StoreProtocol::TibiaExtMaxMessageBody + NetworkMessage::HEADER_LENGTH + NetworkMessage::CHECKSUM_LENGTH +
 	          NetworkMessage::XTEA_MULTIPLE + sizeof(uint16_t) <=

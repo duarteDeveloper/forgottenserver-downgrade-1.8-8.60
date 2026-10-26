@@ -44,6 +44,9 @@ inline constexpr size_t CatalogChunkTargetSize = 48 * 1024;
 /// never shares an output message that would grow past TibiaExtMaxMessageBody.
 inline constexpr uint32_t TibiaExtHelloMagic = 0x54584554; // "TEXT"
 inline constexpr uint8_t TibiaExtHelloVersion = 1;
+/// Same hello with version 2, sent by the DLL right after login: turns the
+/// protocols on (store and market) without opening the store.
+inline constexpr uint8_t TibiaExtHelloOnlyVersion = 2;
 inline constexpr size_t TibiaExtCatalogChunkTargetSize = 12 * 1024;
 inline constexpr size_t TibiaExtMaxMessageBody = 15000;
 

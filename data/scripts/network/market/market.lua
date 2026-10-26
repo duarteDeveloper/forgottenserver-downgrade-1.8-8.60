@@ -1,6 +1,12 @@
 -- Custom Market PacketHandler
 -- OTC sends 0xF4..0xF7 and 0xE0..0xE1. Server responds with 0xDB.
 -- Item ids are traded directly, no wareId/ThingAttrMarket dependency.
+-- TibiaExtendedClientLibrary (8.60 client + ddraw.dll, player:isUsingTibiaExt())
+-- uses the same protocol. Its receive buffer holds 16394 bytes per network
+-- message, so it gets smaller catalog chunks and at most
+-- MarketExt.TIBIAEXT_PACKET_OFFERS offers per side, plus RESP_TIBIAEXT_STATUS
+-- (Tibia Coins, level, vocation, can create offers, offer duration, name)
+-- after the catalog.
 
 if not configManager.getBoolean(configKeys.MARKET_SYSTEM_ENABLED) then
 	CustomMarket = nil
@@ -62,6 +68,15 @@ local MARKET_MAX_AMOUNT_STACKABLE = 64000
 local MARKET_MAX_PRICE = 999999999
 local MARKET_MAX_PACKET_OFFERS = 250
 local MARKET_CATALOG_CHUNK_SIZE = 350
+-- One table (the main chunk is near Lua's 200 locals limit)
+local MarketExt = {
+	RESP_TIBIAEXT_STATUS = 0x05,
+	TIBIAEXT_CATALOG_CHUNK_SIZE = 200,
+	TIBIAEXT_PACKET_OFFERS = 100,
+	FEE_PERCENT = 2,
+	FEE_MIN = 20,
+	FEE_MAX = 250000,
+}
 local MARKET_ACTION_DELAY = 1
 local MARKET_EXPIRE_CHECK_INTERVAL = 60
 local MARKET_DEFAULT_DURATION = 30 * 24 * 60 * 60
@@ -165,8 +180,18 @@ local marketDepotSessions = {}
 local marketOpenSessions = {}
 local lastExpireCheck = 0
 
+function MarketExt.isTibiaExtClient(player)
+	return player and player.isUsingTibiaExt and player:isUsingTibiaExt() or false
+end
+
 local function supportsCustomNetwork(player)
-	return player and player.isUsingOtClient and player:isUsingOtClient()
+	if not player then
+		return false
+	end
+	if player.isUsingOtClient and player:isUsingOtClient() then
+		return true
+	end
+	return MarketExt.isTibiaExtClient(player)
 end
 
 -- ============================================================
@@ -1239,12 +1264,13 @@ local function removeDepotItemsWithAttributes(player, itemId, amount, tier)
 end
 
 -- Calculates the one-percent market fee, clamped to the protocol's 20..1000 range.
+-- 2% of the total price, between 20 and 250,000 gold (Tibia market rule)
 local function calculateFee(price, amount)
-	local fee = math.ceil((price * amount) / 100)
-	if fee < 20 then
-		return 20
-	elseif fee > 1000 then
-		return 1000
+	local fee = math.ceil((price * amount) * MarketExt.FEE_PERCENT / 100)
+	if fee < MarketExt.FEE_MIN then
+		return MarketExt.FEE_MIN
+	elseif fee > MarketExt.FEE_MAX then
+		return MarketExt.FEE_MAX
 	end
 	return fee
 end
@@ -1895,6 +1921,16 @@ local function sendMarketBrowse(player, browseId)
 		return
 	end
 
+	if MarketExt.isTibiaExtClient(player) then
+		-- best offers first (the queries are price ordered); the rest would not fit
+		while #buyOffers > MarketExt.TIBIAEXT_PACKET_OFFERS do
+			table.remove(buyOffers)
+		end
+		while #sellOffers > MarketExt.TIBIAEXT_PACKET_OFFERS do
+			table.remove(sellOffers)
+		end
+	end
+
 	local out = NetworkMessage(player)
 	out:addByte(OPCODE_MARKET_SEND)
 	out:addByte(RESP_BROWSE)
@@ -1928,7 +1964,9 @@ local function sendMarketEnter(player, depotMap)
 
 	local balance = getPlayerTotalMoney(player)
 	local playerGuid = player:getGuid()
-	local sendItemMetadata = player.supportsCustomItemNetwork and player:supportsCustomItemNetwork()
+	local tibiaExt = MarketExt.isTibiaExtClient(player)
+	local sendItemMetadata = tibiaExt or (player.supportsCustomItemNetwork and player:supportsCustomItemNetwork())
+	local chunkSize = tibiaExt and MarketExt.TIBIAEXT_CATALOG_CHUNK_SIZE or MARKET_CATALOG_CHUNK_SIZE
 	local offers = offerCountCache[playerGuid]
 	if offers == nil then
 		offers = clamp(Game.getMarketOfferCount(playerGuid), 0, MARKET_MAX_OFFERS)
@@ -1939,8 +1977,8 @@ local function sendMarketEnter(player, depotMap)
 	local enterEntries = buildMarketEnterEntries(depotMap)
 	local totalItems = #enterEntries
 
-	for offset = 1, math.max(totalItems, 1), MARKET_CATALOG_CHUNK_SIZE do
-		local chunkEnd = math.min(offset + MARKET_CATALOG_CHUNK_SIZE - 1, totalItems)
+	for offset = 1, math.max(totalItems, 1), chunkSize do
+		local chunkEnd = math.min(offset + chunkSize - 1, totalItems)
 		local chunkCount = totalItems == 0 and 0 or (chunkEnd - offset + 1)
 		local out = NetworkMessage(player)
 		out:addByte(OPCODE_MARKET_SEND)
@@ -1967,6 +2005,30 @@ local function sendMarketEnter(player, depotMap)
 
 		out:sendToPlayer(player)
 		chunkIndex = chunkIndex + 1
+	end
+
+	if tibiaExt then
+		-- The 8.60 client knows neither the coins nor the vocation: the market
+		-- window shows the coins and the Level/Voc. filters use these
+		local vocationId = 0
+		local vocation = player:getVocation()
+		if vocation then
+			-- the table has the promoted names too (elite knight = knight)
+			vocationId = MARKET_VOCATION_NAME_TO_CLIENT_ID[normalizeMarketVocationName(vocation:getName())] or 0
+		end
+		local status = NetworkMessage(player)
+		status:addByte(OPCODE_MARKET_SEND)
+		status:addByte(MarketExt.RESP_TIBIAEXT_STATUS)
+		status:addU32(clamp(player:getTibiaCoins(), 0, 0xFFFFFFFF))
+		status:addU16(clamp(player:getLevel(), 0, 0xFFFF))
+		status:addByte(vocationId)
+		-- can create offers: premium, or the server does not ask for it
+		local canCreate = player:isPremium() or not configManager.getBoolean(configKeys.MARKET_PREMIUM)
+		status:addByte(canCreate and 1 or 0)
+		-- offers end at created + duration; the name marks the player's own offers
+		status:addU32(clamp(getOfferDuration(), 0, 0xFFFFFFFF))
+		status:addString(player:getName())
+		status:sendToPlayer(player)
 	end
 	return true
 end
@@ -2141,6 +2203,12 @@ function createHandler.onReceive(player, msg)
 	end
 
 	expireOffers()
+
+	if configManager.getBoolean(configKeys.MARKET_PREMIUM) and not player:isPremium() then
+		releaseLock(playerKey)
+		sendMarketMessage(player, "Only premium account players can create offers.")
+		return
+	end
 
 	local actionType = msg:getByte()
 	local itemId = msg:getU16()

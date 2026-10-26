@@ -1871,8 +1871,13 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 			break;
 
 		case 0xFB: /* custom store open */
-			if (!isOTC && consumeTibiaExtStoreHello(msg)) {
+		{
+			const uint8_t tibiaExtHello = isOTC ? 0 : consumeTibiaExtStoreHello(msg);
+			if (tibiaExtHello != 0) {
 				isTibiaExtStore = true;
+			}
+			if (tibiaExtHello == StoreProtocol::TibiaExtHelloOnlyVersion) {
+				break; // login hello: only turns the protocols on
 			}
 			if (canUseStoreProtocol()) {
 				parseStoreOpen(msg);
@@ -1880,6 +1885,7 @@ void ProtocolGame::parsePacketOnDispatcher(NetworkMessage_ptr& packet)
 				skipUnreadBytes(msg);
 			}
 			break;
+		}
 
 		case 0xFC: /* custom store buy */
 			if (canUseStoreProtocol()) {
@@ -1940,22 +1946,23 @@ void ProtocolGame::parseCharacterBazaar(NetworkMessage& msg)
 	CharacterBazaar::sendCreateResult(player.get(), success, result);
 }
 
-bool ProtocolGame::consumeTibiaExtStoreHello(NetworkMessage& msg)
+uint8_t ProtocolGame::consumeTibiaExtStoreHello(NetworkMessage& msg)
 {
 	constexpr std::size_t helloSize = sizeof(uint32_t) + sizeof(uint8_t);
 	if (getUnreadBytes(msg) != helloSize) {
-		return false;
+		return 0;
 	}
 
 	const auto start = msg.getBufferPosition();
 	const uint32_t magic = msg.get<uint32_t>();
 	const uint8_t helloVersion = msg.getByte();
-	if (magic == StoreProtocol::TibiaExtHelloMagic && helloVersion == StoreProtocol::TibiaExtHelloVersion) {
-		return true;
+	if (magic == StoreProtocol::TibiaExtHelloMagic && (helloVersion == StoreProtocol::TibiaExtHelloVersion ||
+	                                                   helloVersion == StoreProtocol::TibiaExtHelloOnlyVersion)) {
+		return helloVersion;
 	}
 
 	msg.setBufferPosition(start);
-	return false;
+	return 0;
 }
 
 void ProtocolGame::writeStoreMessage(const NetworkMessage& msg)

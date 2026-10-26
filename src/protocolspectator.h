@@ -177,6 +177,19 @@ class ProtocolSpectator {
                 o->writeToOutputBuffer(msg);
         }
 
+        // TibiaExtendedClientLibrary: the owner's flag (set by its hello) and
+        // the writer that keeps an output message inside the 8.60 buffer
+        bool isTibiaExt() {
+            auto o = owner.lock();
+            return o && o->isTibiaExtStore;
+        }
+
+        void writeStoreMessage(const NetworkMessage& msg) {
+            auto o = owner.lock();
+            if (o)
+                o->writeStoreMessage(msg);
+        }
+
         void release() {
             clear();
 

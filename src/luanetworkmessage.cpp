@@ -82,6 +82,10 @@ bool canSendLuaNetworkMessageToPlayer(const NetworkMessage& message, const Playe
 	}
 
 	const uint8_t opcode = message.getBuffer()[NetworkMessage::INITIAL_BUFFER_POSITION];
+	// TibiaExtendedClientLibrary reads the custom market (and only it)
+	if (opcode == 0xDB && player.isTibiaExt()) {
+		return true;
+	}
 	if (isExtendedClientLuaOpcode(opcode)) {
 		return player.isAstraClient() || player.isFonticakClient();
 	}

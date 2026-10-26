@@ -171,7 +171,7 @@ private:
 	void parseStorePurchase(NetworkMessage& msg);
 	void parseStoreHistory(NetworkMessage& msg);
 	void parseStoreTransfer(NetworkMessage& msg);
-	bool consumeTibiaExtStoreHello(NetworkMessage& msg);
+	uint8_t consumeTibiaExtStoreHello(NetworkMessage& msg);
 
 
 	// trade methods
@@ -469,7 +469,8 @@ private:
 	bool supportsAstraBestiaryBannerCreatureData = false;
 	bool supportsAstraExtendedSpellIds = false;
 	bool supportsAstraShopBuyAmountU16 = false;
-	// TibiaExtendedClientLibrary: set by the hello in its store Open request
+	// TibiaExtendedClientLibrary: set by the hello in its store Open request or
+	// by the login hello (version 2); turns on the store and the market
 	bool isTibiaExtStore = false;
 	bool canUseStoreProtocol() const { return isOTC || isTibiaExtStore; }
 	bool supportsZoneWeather = false;
