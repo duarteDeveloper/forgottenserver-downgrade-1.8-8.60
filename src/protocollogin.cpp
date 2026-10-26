@@ -46,17 +46,6 @@ struct LoginCastEntry {
 	bool hasPassword = false;
 };
 
-struct LoginBoostedEntry {
-	uint32_t raceId = 0;
-	std::string name;
-	Outfit_t outfit;
-
-	bool isValid() const
-	{
-		return raceId != 0 && !name.empty() && outfit.lookType != 0;
-	}
-};
-
 std::string getBoostedBossDateKey()
 {
 	const std::time_t now = std::time(nullptr);
@@ -67,6 +56,32 @@ std::string getBoostedBossDateKey()
 
 	return fmt::format("{:04}-{:02}-{:02}", localTime->tm_year + 1900, localTime->tm_mon + 1, localTime->tm_mday);
 }
+
+void addBoostedLoginEntry(const OutputMessage_ptr& output, const LoginBoostedEntry& entry)
+{
+	output->addByte(entry.isValid() ? 1 : 0);
+	if (!entry.isValid()) {
+		return;
+	}
+
+	output->add<uint32_t>(entry.raceId);
+	output->addString(entry.name);
+	output->add<uint16_t>(entry.outfit.lookType);
+	output->addByte(entry.outfit.lookHead);
+	output->addByte(entry.outfit.lookBody);
+	output->addByte(entry.outfit.lookLegs);
+	output->addByte(entry.outfit.lookFeet);
+	output->addByte(entry.outfit.lookAddons);
+}
+
+void addAstraLoginBoostedInfo(const OutputMessage_ptr& output)
+{
+	output->addByte(ASTRA_LOGIN_BOOSTED_INFO_MARKER);
+	addBoostedLoginEntry(output, getBoostedCreatureLoginEntry());
+	addBoostedLoginEntry(output, getBoostedBossLoginEntry());
+}
+
+} // namespace
 
 LoginBoostedEntry getBoostedCreatureLoginEntry()
 {
@@ -119,32 +134,6 @@ LoginBoostedEntry getBoostedBossLoginEntry()
 
 	return entry;
 }
-
-void addBoostedLoginEntry(const OutputMessage_ptr& output, const LoginBoostedEntry& entry)
-{
-	output->addByte(entry.isValid() ? 1 : 0);
-	if (!entry.isValid()) {
-		return;
-	}
-
-	output->add<uint32_t>(entry.raceId);
-	output->addString(entry.name);
-	output->add<uint16_t>(entry.outfit.lookType);
-	output->addByte(entry.outfit.lookHead);
-	output->addByte(entry.outfit.lookBody);
-	output->addByte(entry.outfit.lookLegs);
-	output->addByte(entry.outfit.lookFeet);
-	output->addByte(entry.outfit.lookAddons);
-}
-
-void addAstraLoginBoostedInfo(const OutputMessage_ptr& output)
-{
-	output->addByte(ASTRA_LOGIN_BOOSTED_INFO_MARKER);
-	addBoostedLoginEntry(output, getBoostedCreatureLoginEntry());
-	addBoostedLoginEntry(output, getBoostedBossLoginEntry());
-}
-
-} // namespace
 
 // --- Brute Force Protection ---
 

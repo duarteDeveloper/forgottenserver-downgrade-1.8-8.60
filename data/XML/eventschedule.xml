@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Event Schedule shown on the TibiaExtendedClientLibrary login screen (status protocol, <tibiaext>).
+
+	startdate / enddate: "YYYY-MM-DD" or "YYYY-MM-DD HH:MM", server local time; a date without a
+	time ends at 23:59:59. Ended events are not sent; events that have started are "Active", the
+	others "Upcoming".
+	color (optional): "#RRGGBB" for the row; without it, gold for active and teal for upcoming.
+	description (optional): shown when the mouse is over the event.
+
+	Example:
+	<event name="Double Experience" startdate="2026-12-24" enddate="2026-12-26 23:00" color="#2d7400"
+		description="All creatures give twice the experience." />
+-->
+<eventschedule>
+</eventschedule>

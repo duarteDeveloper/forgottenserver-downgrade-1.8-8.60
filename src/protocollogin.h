@@ -4,10 +4,25 @@
 #ifndef FS_PROTOCOLLOGIN_H
 #define FS_PROTOCOLLOGIN_H
 
+#include "enums.h"
 #include "protocol.h"
 
 class NetworkMessage;
 class OutputMessage;
+
+/// Today's boosted creature or boss: sent by the login protocol to Astra/Fonticak
+/// and by the status protocol (ProtocolStatus) to TibiaExtendedClientLibrary.
+struct LoginBoostedEntry
+{
+	uint32_t raceId = 0;
+	std::string name;
+	Outfit_t outfit;
+
+	bool isValid() const { return raceId != 0 && !name.empty() && outfit.lookType != 0; }
+};
+
+LoginBoostedEntry getBoostedCreatureLoginEntry();
+LoginBoostedEntry getBoostedBossLoginEntry();
 
 class LoginAttemptLimiter
 {
