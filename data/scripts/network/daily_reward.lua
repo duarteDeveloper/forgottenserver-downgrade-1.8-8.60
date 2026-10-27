@@ -13,7 +13,22 @@ local DAILY_STATE_AVAILABLE = 2
 
 local REWARD_TYPE_ITEM = 1
 local REWARD_TYPE_SYSTEM = 2
+local SYSTEM_REWARD_XP_BOOST = 1
 local SYSTEM_REWARD_PREY_REROLL = 2
+
+-- TibiaExtendedClientLibrary (the 8.60 client with its ddraw.dll) has no prey:
+-- its prey days give an XP boost instead, 10 minutes of 50% per wildcard
+local XP_BOOST_PERCENT = 50
+local XP_BOOST_MINUTES_PER_WILDCARD = 10
+
+-- A free claim (claim type 0) needs a reward shrine used in the last minutes:
+-- the client's word that it is at a shrine is not enough
+local SHRINE_ACCESS_SECONDS = 5 * 60
+local shrineAccess = {}
+
+-- TibiaExtendedClientLibrary: an open request with [u8 1] asks only for the
+-- collection state (the DLL sends it after its login hello)
+local REQUEST_STATE_ONLY = 1
 
 local HISTORY_LIMIT = 50
 local MAX_SELECTED_ITEMS = 32
@@ -54,12 +69,20 @@ local STREAK_DESCRIPTIONS = {
 
 local schemaChecked = false
 
+local function isTibiaExt(player)
+	return player and player.isUsingTibiaExt and player:isUsingTibiaExt()
+end
+
 local function supportsCustomNetwork(player)
-	return player and player.isUsingOtClient and player:isUsingOtClient()
+	if not player then
+		return false
+	end
+	return (player.isUsingOtClient and player:isUsingOtClient()) or isTibiaExt(player)
 end
 
 local function sendResourceBalance(player, resourceType, value)
-	if not supportsCustomNetwork(player) then
+	-- TibiaExt gets the Instant Reward Access count in the reward wall packet
+	if not supportsCustomNetwork(player) or isTibiaExt(player) then
 		return false
 	end
 
@@ -114,6 +137,24 @@ end
 
 local function getRewardAmount(reward, premium)
 	return premium and (reward.premiumAmount or reward.freeAmount or 1) or (reward.freeAmount or 1)
+end
+
+-- The reward of a lane day (1..7) as this player gets it
+local function getPlayerReward(player, day)
+	local reward = DAILY_REWARDS[day]
+	if reward and reward.type == "prey" and isTibiaExt(player) then
+		return {
+			type = "xpboost",
+			freeAmount = (reward.freeAmount or 1) * XP_BOOST_MINUTES_PER_WILDCARD,
+			premiumAmount = (reward.premiumAmount or reward.freeAmount or 1) * XP_BOOST_MINUTES_PER_WILDCARD,
+		}
+	end
+	return reward
+end
+
+local function hasShrineAccess(player)
+	local since = shrineAccess[player:getId()]
+	return since ~= nil and os.time() - since <= SHRINE_ACCESS_SECONDS
 end
 
 local function getCurrentRewardIndex(player)
@@ -210,7 +251,7 @@ end
 local function writeSystemReward(out, reward, premium)
 	out:addByte(REWARD_TYPE_SYSTEM)
 	out:addByte(1)
-	out:addByte(SYSTEM_REWARD_PREY_REROLL)
+	out:addByte(reward.type == "xpboost" and SYSTEM_REWARD_XP_BOOST or SYSTEM_REWARD_PREY_REROLL)
 	out:addByte(math.min(getRewardAmount(reward, premium), 0xFF))
 end
 
@@ -231,7 +272,8 @@ local function sendDailyReward(player)
 	local out = NetworkMessage(player)
 	out:addByte(SERVER_PACKET_DAILY_REWARD_BASIC)
 	out:addByte(#DAILY_REWARDS)
-	for _, reward in ipairs(DAILY_REWARDS) do
+	for day = 1, #DAILY_REWARDS do
+		local reward = getPlayerReward(player, day)
 		writeDailyReward(out, reward, false)
 		writeDailyReward(out, reward, true)
 	end
@@ -259,7 +301,8 @@ local function sendDailyRewardCollectionState(player)
 	return out:sendToPlayer(player)
 end
 
-local function sendOpenRewardWall(player, fromShrine)
+-- notice: why the last claim failed (only TibiaExt reads it)
+local function sendOpenRewardWall(player, fromShrine, notice)
 	if not supportsCustomNetwork(player) then
 		return false
 	end
@@ -288,6 +331,12 @@ local function sendOpenRewardWall(player, fromShrine)
 		out:addU16(math.min(jokerTokens, 0xFFFF))
 	end
 	out:addU16(math.min(getStreakLevel(player), 0xFFFF))
+	if isTibiaExt(player) then
+		-- premium, Instant Reward Access and the last claim error
+		out:addByte(isPremiumPlayer(player) and 1 or 0)
+		out:addU16(math.min(getStorageNumber(player, STORAGES.instantTokens, 0), 0xFFFF))
+		out:addString(notice or "")
+	end
 	return out:sendToPlayer(player)
 end
 
@@ -296,6 +345,10 @@ DailyRewardSystem = DailyRewardSystem or {}
 function DailyRewardSystem.openRewardWall(player, fromShrine)
 	if not supportsCustomNetwork(player) then
 		return false
+	end
+
+	if fromShrine == true then
+		shrineAccess[player:getId()] = os.time()
 	end
 
 	checkMonthlyJoker(player)
@@ -353,7 +406,7 @@ end
 local function sendClaimError(player, message)
 	player:sendCancelMessage(message)
 	sendDailyReward(player)
-	sendOpenRewardWall(player, true)
+	sendOpenRewardWall(player, hasShrineAccess(player), message)
 	return false
 end
 
@@ -411,6 +464,14 @@ end
 
 local function giveSystemReward(player, reward, premium)
 	local amount = getRewardAmount(reward, premium)
+	if reward.type == "xpboost" then
+		if not player.getXpBoostTime or not player.setXpBoostTime or not player.setXpBoostPercent then
+			return false, "XP Boost is not available."
+		end
+		player:setXpBoostPercent(math.max(player:getXpBoostPercent(), XP_BOOST_PERCENT))
+		player:setXpBoostTime(math.min(65535, player:getXpBoostTime() + amount * 60))
+		return true, string.format("%d minutes of %d%% XP Boost", amount, XP_BOOST_PERCENT)
+	end
 	if reward.type == "prey" then
 		if not PreySystem or not PreySystem.addWildcards then
 			return false, "Prey System is not available."
@@ -472,6 +533,8 @@ local function claimReward(player, msg)
 		if instantTokens < 1 then
 			return sendClaimError(player, "You need an Instant Reward Access token to claim outside of a shrine. Visit a reward shrine to claim for free.")
 		end
+	elseif not hasShrineAccess(player) then
+		return sendClaimError(player, "Use a reward shrine to claim your daily reward for free, or an Instant Reward Access token from anywhere.")
 	end
 
 	local selectedItems = parseSelectedItems(msg)
@@ -484,11 +547,11 @@ local function claimReward(player, msg)
 	end
 
 	local rewardIndex = getCurrentRewardIndex(player)
-	local reward = DAILY_REWARDS[rewardIndex + 1]
+	local reward = getPlayerReward(player, rewardIndex + 1)
 	if not reward then
 		resetMissedReward(player)
 		rewardIndex = 0
-		reward = DAILY_REWARDS[1]
+		reward = getPlayerReward(player, 1)
 	end
 
 	local premium = isPremiumPlayer(player)
@@ -534,21 +597,29 @@ local function claimReward(player, msg)
 	return sendOpenRewardWall(player, not isInstantClaim)
 end
 
-local openHandler = PacketHandler(OPCODE_REWARD_OPEN)
-function openHandler.onReceive(player, msg)
+local function onOpenRequest(player, msg)
+	if isTibiaExt(player) and NetworkGuard.canRead(msg, 1) and NetworkGuard.readByte(msg) == REQUEST_STATE_ONLY then
+		if NetworkGuard.cooldown(player, "daily-reward-state", 500) then
+			checkMonthlyJoker(player)
+			sendDailyRewardCollectionState(player)
+		end
+		return
+	end
 	if not NetworkGuard.cooldown(player, "daily-reward-open", 500) then
 		return
 	end
 	openRewardWall(player)
 end
+
+local openHandler = PacketHandler(OPCODE_REWARD_OPEN)
+function openHandler.onReceive(player, msg)
+	onOpenRequest(player, msg)
+end
 openHandler:register()
 
 local openHandlerB4 = PacketHandler(0xB4)
 function openHandlerB4.onReceive(player, msg)
-	if not NetworkGuard.cooldown(player, "daily-reward-open", 500) then
-		return
-	end
-	openRewardWall(player)
+	onOpenRequest(player, msg)
 end
 openHandlerB4:register()
 
