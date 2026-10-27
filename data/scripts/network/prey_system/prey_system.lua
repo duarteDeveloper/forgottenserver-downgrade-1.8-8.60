@@ -1040,21 +1040,9 @@ function selectHandler.onReceive(player, msg)
 end
 selectHandler:register()
 
-local listRerollHandler = PacketHandler(PREY_OPCODE_LIST_REROLL)
-function listRerollHandler.onReceive(player, msg)
-	setPreyNetworkMode(player, "fonticak")
-	if msg:len() - msg:tell() < 1 then
-		return
-	end
-
-	local slot = msg:getByte()
-	if slot >= PREY_SLOTS then
-		return sendError(player, "Invalid slot.")
-	end
-	if not requirePreySlotUnlocked(player, slot) then
-		return false
-	end
-
+-- A new list for the slot: free once every 20 hours per slot, gold
+-- (level * 150, inventory and bank) otherwise
+local function legacyListReroll(player, slot)
 	local prey = getPlayerPrey(player)
 	local slotData = prey.slots[slot]
 	local now = os.time()
@@ -1092,6 +1080,24 @@ function listRerollHandler.onReceive(player, msg)
 	sendSlotUpdate(player, slot)
 	sendPreyBalances(player)
 end
+
+local listRerollHandler = PacketHandler(PREY_OPCODE_LIST_REROLL)
+function listRerollHandler.onReceive(player, msg)
+	setPreyNetworkMode(player, "fonticak")
+	if msg:len() - msg:tell() < 1 then
+		return
+	end
+
+	local slot = msg:getByte()
+	if slot >= PREY_SLOTS then
+		return sendError(player, "Invalid slot.")
+	end
+	if not requirePreySlotUnlocked(player, slot) then
+		return false
+	end
+
+	return legacyListReroll(player, slot)
+end
 listRerollHandler:register()
 
 local clearHandler = PacketHandler(PREY_OPCODE_CLEAR)
@@ -1109,9 +1115,14 @@ function clearHandler.onReceive(player, msg)
 		return false
 	end
 
-	local prey = getPlayerPrey(player)
-	prey.slots[slot] = defaultSlot()
-	sendSlotUpdate(player, slot)
+	-- Clearing a slot leaves it with a new list, so it follows the list reroll
+	-- rules. It used to reset the slot together with its free reroll timer:
+	-- any client could get new lists for free, endlessly.
+	local slotData = getPlayerPrey(player).slots[slot]
+	if slotData.state == PREY_STATE_LIST_SELECTION and #(slotData.list_monsters or {}) > 0 then
+		return sendSlotUpdate(player, slot)
+	end
+	return legacyListReroll(player, slot)
 end
 clearHandler:register()
 
