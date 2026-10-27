@@ -82,9 +82,25 @@ bool canSendLuaNetworkMessageToPlayer(const NetworkMessage& message, const Playe
 	}
 
 	const uint8_t opcode = message.getBuffer()[NetworkMessage::INITIAL_BUFFER_POSITION];
-	// TibiaExtendedClientLibrary reads the custom market (and only it)
-	if (opcode == 0xDB && player.isTibiaExt()) {
-		return true;
+	// TibiaExtendedClientLibrary reads the custom market and the native prey
+	// (slot data, prices, errors and the bank, gold and prey wildcard balances)
+	if (player.isTibiaExt()) {
+		switch (opcode) {
+			case 0xDB: // custom market
+			case 0xE8: // native prey slot data
+			case 0xE9: // native prey prices
+			case 0xED: // prey error
+				return true;
+			case 0xEE: { // resource balance: [u8 type][u64]
+				if (message.getLength() < 2) {
+					return false;
+				}
+				const uint8_t resource = message.getBuffer()[NetworkMessage::INITIAL_BUFFER_POSITION + 1];
+				return resource == 0 || resource == 1 || resource == 10; // bank, gold, prey wildcards
+			}
+			default:
+				break;
+		}
 	}
 	if (isExtendedClientLuaOpcode(opcode)) {
 		return player.isAstraClient() || player.isFonticakClient();

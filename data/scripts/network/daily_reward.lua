@@ -16,8 +16,9 @@ local REWARD_TYPE_SYSTEM = 2
 local SYSTEM_REWARD_XP_BOOST = 1
 local SYSTEM_REWARD_PREY_REROLL = 2
 
--- TibiaExtendedClientLibrary (the 8.60 client with its ddraw.dll) has no prey:
--- its prey days give an XP boost instead, 10 minutes of 50% per wildcard
+-- TibiaExtendedClientLibrary (the 8.60 client with its ddraw.dll) on a server
+-- without the prey system: its prey days give an XP boost instead, 10 minutes
+-- of 50% per wildcard
 local XP_BOOST_PERCENT = 50
 local XP_BOOST_MINUTES_PER_WILDCARD = 10
 
@@ -142,7 +143,7 @@ end
 -- The reward of a lane day (1..7) as this player gets it
 local function getPlayerReward(player, day)
 	local reward = DAILY_REWARDS[day]
-	if reward and reward.type == "prey" and isTibiaExt(player) then
+	if reward and reward.type == "prey" and isTibiaExt(player) and not (PreySystem and PreySystem.addWildcards) then
 		return {
 			type = "xpboost",
 			freeAmount = (reward.freeAmount or 1) * XP_BOOST_MINUTES_PER_WILDCARD,

@@ -108,8 +108,21 @@ local function isAstraClient(player)
 	return player and player.isUsingAstraClient and player:isUsingAstraClient()
 end
 
+-- TibiaExtendedClientLibrary (the 8.60 client with its ddraw.dll), after its
+-- login hello: native prey with the Astra layout, errors on 0xED
+local function isTibiaExt(player)
+	return player and player.isUsingTibiaExt and player:isUsingTibiaExt()
+end
+
+local function usesAstraExtensions(player)
+	return isAstraClient(player) or isTibiaExt(player)
+end
+
 local function supportsCustomNetwork(player)
-	return player and player.isUsingOtClient and player:isUsingOtClient()
+	if not player then
+		return false
+	end
+	return (player.isUsingOtClient and player:isUsingOtClient()) or isTibiaExt(player)
 end
 
 local function isPreySlotUnlocked(player, slot)
@@ -443,7 +456,7 @@ local function sendPreyBalances(player)
 end
 
 local function sendError(player, message)
-	if supportsCustomNetwork(player) and usesFonticakPreyProtocol(player) then
+	if supportsCustomNetwork(player) and (usesFonticakPreyProtocol(player) or isTibiaExt(player)) then
 		local out = NetworkMessage(player)
 		out:addByte(PREY_OPCODE_SEND)
 		out:addByte(PREY_SEND_ERROR)
@@ -798,7 +811,7 @@ local function sendAstraFullPrey(player, sendBalances)
 	for slot = 0, PREY_SLOTS - 1 do
 		local out = NetworkMessage(player)
 		out:addByte(PREY_NATIVE_OPCODE_DATA)
-		writeAstraSlot(out, player, slot, prey.slots[slot], isAstraClient(player))
+		writeAstraSlot(out, player, slot, prey.slots[slot], usesAstraExtensions(player))
 		out:sendToPlayer(player)
 	end
 	syncPreyCombatBonuses(player, prey)
@@ -813,7 +826,7 @@ local function sendAstraSlotUpdate(player, slot, save)
 	local prey = getPlayerPrey(player)
 	local out = NetworkMessage(player)
 	out:addByte(PREY_NATIVE_OPCODE_DATA)
-	writeAstraSlot(out, player, slot, prey.slots[slot], isAstraClient(player))
+	writeAstraSlot(out, player, slot, prey.slots[slot], usesAstraExtensions(player))
 	syncPreyCombatBonuses(player, prey)
 	local sent = out:sendToPlayer(player)
 	if save ~= false then
@@ -823,6 +836,11 @@ local function sendAstraSlotUpdate(player, slot, save)
 end
 
 local function sendAstraTimeLeft(player, slot, timeLeft)
+	-- Only clients that read the prey opcodes: a plain 8.60 client drops the
+	-- connection on an unknown 0xE7
+	if not supportsCustomNetwork(player) then
+		return false
+	end
 	local out = NetworkMessage(player)
 	out:addByte(PREY_NATIVE_OPCODE_TIME_LEFT)
 	out:addByte(slot)
